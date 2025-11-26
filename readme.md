@@ -18,7 +18,9 @@ Low-poly, PS1/PS2-inspired LAN FPS prototype targeted at ultra-lean handheld har
 - Multiple arena presets with PS1-style prop grids (perks, wall ammo, mystery box) can be cycled in the lobby; current layouts can be saved/overridden via simple text presets.
 - Multiplayer sandbox now supports free-for-all or team deathmatch scoring with lightweight frag tracking and team bits synced across the LAN payload.
 - LAN payloads now include shared damage bursts so deathmatch hits reconcile across peers, plus local respawn timers that reset health/ammo on the arena spawn.
-- Baked nav points per arena steer zombies through simple meshes for more varied routes, while the HUD adds hit-confirm markers and a compact killfeed for multiplayer.
+- Baked nav points per arena steer zombies through weighted meshes for more varied routes, while the HUD adds hit-confirm markers and a compact killfeed for multiplayer.
+- LAN frag/assist events mirror killfeed entries for all peers and keep team deathmatch scores aligned, including late-join bursts.
+- Light cover chunks per arena and safe respawn picks keep lanes protected while spectators drift above spawn until they rejoin.
 
 ## Building
 1. Install Raylib development headers/libraries (e.g., `sudo apt install libraylib-dev` or build from source).
@@ -39,6 +41,6 @@ Low-poly, PS1/PS2-inspired LAN FPS prototype targeted at ultra-lean handheld har
 - Saving/overrides: pressing `P` writes `layout_<arena>.txt` in the project root (one prop per line: `kind x y z`). On launch, any matching file overrides the baked-in layout so routes can be themed without recompiling.
 
 ## Next steps
-- Broadcast frag/assist events over LAN to mirror the killfeed for all peers and keep team scores aligned with remote deaths.
-- Layer light cover geometry into arenas and weight nav points so zombies and spawns avoid unsafe lanes when players respawn.
-- Add a short spectator drift during multiplayer respawn plus audio cues for hit markers and killfeed entries.
+- Make cover layouts loadable alongside perk/prop overrides so arenas can be rethemed without code changes.
+- Let LAN peers acknowledge received frag/assist events to prevent duplicate feed spam during high packet loss.
+- Add lightweight gore/impact sprites and per-weapon kick sounds to deepen hit feedback without hurting performance.

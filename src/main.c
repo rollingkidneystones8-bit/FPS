@@ -51,6 +51,13 @@ typedef struct PropSpot
     PropKind kind;
 } PropSpot;
 
+typedef struct CoverPiece
+{
+    Vector3 position;
+    Vector3 size;
+    Color color;
+} CoverPiece;
+
 typedef struct ArenaPreset
 {
     const char *name;
@@ -59,6 +66,9 @@ typedef struct ArenaPreset
     Vector3 playerSpawn;
     Vector3 navPoints[8];
     int navCount;
+    float navWeights[8];
+    CoverPiece cover[8];
+    int coverCount;
 } ArenaPreset;
 
 typedef enum GameMode
@@ -193,6 +203,7 @@ typedef struct Peer
     bool teamMode;
     float respawnTimer;
     uint8_t lastDamageId;
+    uint8_t lastEventId;
 } Peer;
 
 typedef struct LanState
@@ -205,6 +216,8 @@ typedef struct LanState
     uint8_t lastPacket[LAN_PACKET_SIZE];
     size_t lastPacketSize;
     double selfJoinTime;
+    LanEvent incomingEvent;
+    bool hasIncomingEvent;
 } LanState;
 
 typedef enum MenuAction
@@ -239,6 +252,10 @@ typedef struct LanPayload
     int16_t rayDir[3];
     uint8_t rayDamage;
     uint8_t damageId;
+    uint8_t eventKind;
+    uint8_t eventTeam;
+    uint8_t eventId;
+    char eventTarget[LAN_NAME_BYTES];
 } LanPayload;
 
 typedef struct DamageEvent
@@ -249,6 +266,15 @@ typedef struct DamageEvent
     float ttl;
     uint8_t id;
 } DamageEvent;
+
+typedef struct LanEvent
+{
+    uint8_t kind;
+    uint8_t team;
+    uint8_t id;
+    char target[LAN_NAME_BYTES];
+    char actor[LAN_NAME_BYTES];
+} LanEvent;
 
 static Sound MakeTone(float frequency, float duration, float volume)
 {
@@ -342,6 +368,12 @@ static size_t PackLanPayload(uint8_t *out,
     }
     out[offset++] = payload->rayDamage;
     out[offset++] = payload->damageId;
+    out[offset++] = payload->eventKind;
+    out[offset++] = payload->eventTeam;
+    out[offset++] = payload->eventId;
+    memset(&out[offset], 0, LAN_NAME_BYTES);
+    memcpy(&out[offset], payload->eventTarget, LAN_NAME_BYTES);
+    offset += LAN_NAME_BYTES;
 
     uint16_t checksum = useChecksum ? ComputeChecksumBytes(out, offset) : 0;
     out[offset++] = (uint8_t)((checksum >> 8) & 0xFF);
@@ -351,7 +383,7 @@ static size_t PackLanPayload(uint8_t *out,
 
 static bool UnpackLanPayload(const uint8_t *in, size_t len, bool useChecksum, LanPayload *payload)
 {
-    if (len < 3 * sizeof(int16_t) + 1 + 2 + 1 + 1 + 1 + 2 + 2 + 1 + LAN_NAME_BYTES + 2 + 2 * 3 + 2 * 3 + 1 + 1 + 2)
+    if (len < 3 * sizeof(int16_t) + 1 + 2 + 1 + 1 + 1 + 2 + 2 + 1 + LAN_NAME_BYTES + 2 + 2 * 3 + 2 * 3 + 1 + 1 + 1 + 1 + LAN_NAME_BYTES + 2)
         return false;
 
     size_t offset = 0;
@@ -387,6 +419,12 @@ static bool UnpackLanPayload(const uint8_t *in, size_t len, bool useChecksum, La
     }
     payload->rayDamage = in[offset++];
     payload->damageId = in[offset++];
+    payload->eventKind = in[offset++];
+    payload->eventTeam = in[offset++];
+    payload->eventId = in[offset++];
+    memcpy(payload->eventTarget, &in[offset], LAN_NAME_BYTES);
+    payload->eventTarget[LAN_NAME_BYTES - 1] = '\0';
+    offset += LAN_NAME_BYTES;
     uint16_t checksum = (uint16_t)((in[offset] << 8) | in[offset + 1]);
 
     if (useChecksum && checksum != 0)
@@ -604,7 +642,12 @@ static const ArenaPreset gArenaPresets[MAX_ARENAS] = {
      .spotCount = 5,
      .playerSpawn = {0.0f, PLAYER_HEIGHT, -1.0f},
      .navPoints = {{-3.2f, 0.0f, 2.8f}, {3.4f, 0.0f, 2.6f}, {-3.4f, 0.0f, -2.8f}, {3.0f, 0.0f, -2.6f}, {0.0f, 0.0f, 3.2f}},
-     .navCount = 5},
+     .navWeights = {1.0f, 1.1f, 0.9f, 1.0f, 1.2f},
+     .navCount = 5,
+     .cover = {{{-2.6f, 0.3f, 1.2f}, {0.7f, 0.6f, 0.4f}, {70, 90, 120, 255}},
+               {{2.2f, 0.3f, -0.8f}, {0.6f, 0.6f, 0.6f}, {90, 110, 150, 255}},
+               {{0.0f, 0.25f, -2.6f}, {0.9f, 0.5f, 0.5f}, {80, 80, 110, 255}}},
+     .coverCount = 3},
     {.name = "Hangar",
      .spots = {{{-1.2f, 0.0f, 3.4f}, PROP_PERK_QUICK},
                {{2.4f, 0.0f, 0.8f}, PROP_PERK_SPEED},
@@ -615,7 +658,12 @@ static const ArenaPreset gArenaPresets[MAX_ARENAS] = {
      .spotCount = 6,
      .playerSpawn = {-1.0f, PLAYER_HEIGHT, 0.0f},
      .navPoints = {{-3.6f, 0.0f, 3.0f}, {3.2f, 0.0f, 2.8f}, {-3.2f, 0.0f, -2.4f}, {3.2f, 0.0f, -2.6f}, {0.0f, 0.0f, 0.0f}},
-     .navCount = 5},
+     .navWeights = {1.15f, 1.0f, 0.85f, 1.0f, 1.25f},
+     .navCount = 5,
+     .cover = {{{-0.8f, 0.4f, 1.6f}, {0.9f, 0.8f, 0.5f}, {110, 100, 120, 255}},
+               {{2.8f, 0.35f, -0.6f}, {0.8f, 0.7f, 0.6f}, {120, 120, 90, 255}},
+               {{-3.0f, 0.35f, -1.6f}, {0.7f, 0.6f, 0.7f}, {70, 80, 110, 255}}},
+     .coverCount = 3},
     {.name = "Corridors",
      .spots = {{{-3.8f, 0.0f, 0.4f}, PROP_PERK_QUICK},
                {{-1.2f, 0.0f, -3.6f}, PROP_PERK_SPEED},
@@ -625,7 +673,12 @@ static const ArenaPreset gArenaPresets[MAX_ARENAS] = {
      .spotCount = 5,
      .playerSpawn = {1.2f, PLAYER_HEIGHT, 1.2f},
      .navPoints = {{-3.6f, 0.0f, 0.0f}, {3.2f, 0.0f, 0.0f}, {0.0f, 0.0f, -3.4f}, {0.0f, 0.0f, 3.6f}},
-     .navCount = 4}};
+     .navWeights = {1.05f, 1.05f, 1.2f, 0.95f},
+     .navCount = 4,
+     .cover = {{{-1.0f, 0.35f, 0.0f}, {0.9f, 0.7f, 0.5f}, {90, 110, 130, 255}},
+               {{2.8f, 0.35f, 1.8f}, {0.8f, 0.7f, 0.7f}, {130, 90, 80, 255}},
+               {{0.8f, 0.35f, -2.4f}, {0.7f, 0.6f, 0.7f}, {80, 80, 100, 255}}},
+     .coverCount = 3}};
 
 static int PropCost(PropKind kind)
 {
@@ -678,6 +731,7 @@ static bool InitLan(LanState *lan)
     lan->broadcastAccumulator = 0.0;
     lan->useChecksum = true;
     lan->selfJoinTime = GetTime();
+    lan->hasIncomingEvent = false;
     return true;
 }
 
@@ -700,7 +754,9 @@ static void UpdateLan(LanState *lan,
                       int *sharePipCash,
                       int *sharePipScore,
                       const DamageEvent *damageRay,
-                      bool allowDamageBursts)
+                      bool allowDamageBursts,
+                      LanEvent *outEvent,
+                      uint8_t *eventCounter)
 {
     if (!lan->enabled)
         return;
@@ -736,6 +792,13 @@ static void UpdateLan(LanState *lan,
         if (multiVariant == MULTI_TEAM) flags |= 1 << 6;
         payload.flags = (uint8_t)flags;
         strncpy(payload.name, playerName, LAN_NAME_BYTES - 1);
+        if (outEvent && outEvent->kind > 0 && eventCounter)
+        {
+            payload.eventKind = outEvent->kind;
+            payload.eventTeam = outEvent->team;
+            payload.eventId = (*eventCounter)++;
+            strncpy(payload.eventTarget, outEvent->target, LAN_NAME_BYTES - 1);
+        }
         if (damageRay && damageRay->ttl > 0.0f)
         {
             for (int i = 0; i < 3; i++)
@@ -755,6 +818,8 @@ static void UpdateLan(LanState *lan,
         sendto(lan->socketFd, buffer, packetSize, 0, (struct sockaddr *)&bcast, sizeof(bcast));
         *pendingCashShare = 0;
         *pendingScoreShare = 0;
+        if (outEvent)
+            outEvent->kind = 0;
     }
 
     struct sockaddr_in from;
@@ -794,6 +859,18 @@ static void UpdateLan(LanState *lan,
                 if (packet.name[0])
                     strncpy(p->name, packet.name, sizeof(p->name));
                 p->lastHeard = timeNow;
+                if (packet.eventKind > 0 && packet.eventId != p->lastEventId)
+                {
+                    const char *actorName = p->name[0] ? p->name : "Peer";
+                    memset(&lan->incomingEvent, 0, sizeof(lan->incomingEvent));
+                    lan->incomingEvent.kind = packet.eventKind;
+                    lan->incomingEvent.team = p->team;
+                    lan->incomingEvent.id = packet.eventId;
+                    strncpy(lan->incomingEvent.actor, actorName, LAN_NAME_BYTES - 1);
+                    strncpy(lan->incomingEvent.target, packet.eventTarget, LAN_NAME_BYTES - 1);
+                    lan->hasIncomingEvent = true;
+                    p->lastEventId = packet.eventId;
+                }
                 assigned = true;
                 player->cash = (int)Clamp((float)player->cash + (float)packet.cashDelta, 0.0f, 60000.0f);
                 player->score = (int)Clamp((float)player->score + (float)packet.scoreDelta, 0.0f, 60000.0f);
@@ -856,6 +933,8 @@ static void UpdateLan(LanState *lan,
                         snprintf(p->name, sizeof(p->name), "P-%02u", octet);
                     p->lastHeard = timeNow;
                     p->catchupSent = false;
+                    if (packet.eventKind > 0)
+                        p->lastEventId = packet.eventId;
                     if (lan->lastPacketSize > 0)
                         sendto(lan->socketFd,
                                lan->lastPacket,
@@ -1108,15 +1187,19 @@ static void PushTrail(TrailFX *fx, int *idx, Vector3 pos, Color color)
     *idx = (*idx + 1) % MAX_TRAILS;
 }
 
-static int ChooseNavTarget(const Vector3 *navPoints, int navCount, Vector3 playerPos)
+static int ChooseNavTarget(const Vector3 *navPoints, const float *navWeights, int navCount, Vector3 playerPos)
 {
     if (navCount <= 0)
         return -1;
     int best = 0;
     float bestDist = Vector3Distance(navPoints[0], playerPos);
+    if (navWeights)
+        bestDist /= fmaxf(navWeights[0], 0.01f);
     for (int i = 1; i < navCount; i++)
     {
         float d = Vector3Distance(navPoints[i], playerPos);
+        if (navWeights)
+            d /= fmaxf(navWeights[i], 0.01f);
         if (d < bestDist)
         {
             bestDist = d;
@@ -1129,6 +1212,30 @@ static int ChooseNavTarget(const Vector3 *navPoints, int navCount, Vector3 playe
     return best;
 }
 
+static Vector3 SelectSafeSpawn(const ArenaPreset *preset)
+{
+    if (!preset)
+        return (Vector3){0};
+    if (preset->navCount > 0)
+    {
+        float best = -1000.0f;
+        int bestIndex = 0;
+        for (int i = 0; i < preset->navCount; i++)
+        {
+            float w = (preset->navWeights[i] > 0.01f) ? preset->navWeights[i] : 0.01f;
+            if (w > best)
+            {
+                best = w;
+                bestIndex = i;
+            }
+        }
+        Vector3 pos = preset->navPoints[bestIndex];
+        pos.y = PLAYER_HEIGHT;
+        return pos;
+    }
+    return preset->playerSpawn;
+}
+
 static void UpdateZombies(ZombiesState *zombies,
                           float dt,
                           Vector3 playerPos,
@@ -1136,6 +1243,7 @@ static void UpdateZombies(ZombiesState *zombies,
                           TrailFX *trails,
                           int *trailIndex,
                           const Vector3 *navPoints,
+                          const float *navWeights,
                           int navCount)
 {
     const float spawnDelay = 2.0f;
@@ -1176,7 +1284,7 @@ static void UpdateZombies(ZombiesState *zombies,
             e->navCooldown -= dt;
             if (e->navTarget < 0 || e->navTarget >= navCount || e->navCooldown <= 0.0f)
             {
-                e->navTarget = ChooseNavTarget(navPoints, navCount, playerPos);
+                e->navTarget = ChooseNavTarget(navPoints, navWeights, navCount, playerPos);
                 e->navCooldown = 2.0f + (float)GetRandomValue(0, 60) / 60.0f;
             }
             if (e->navTarget >= 0 && e->navTarget < navCount)
@@ -1422,6 +1530,12 @@ static void PushKillfeed(KillfeedEntry *feed, int count, const char *text, Color
     feed[0].color = color;
 }
 
+static void PushKillfeedSfx(KillfeedEntry *feed, int count, const char *text, Color color, Sound sound)
+{
+    PushKillfeed(feed, count, text, color);
+    PlaySoundSafe(sound);
+}
+
 static void DrawInfo(float dt,
                      GameMode mode,
                      const Weapon *weapon,
@@ -1593,7 +1707,7 @@ int main(int argc, char **argv)
         .projection = CAMERA_PERSPECTIVE,
     };
 
-    camera.position = gArenaPresets[0].playerSpawn;
+    camera.position = SelectSafeSpawn(&gArenaPresets[0]);
     camera.target = Vector3Add(camera.position, (Vector3){0.0f, 0.0f, -1.0f});
 
     Weapon weapons[] = {
@@ -1656,7 +1770,11 @@ int main(int argc, char **argv)
     float playerRespawnTimer = 0.0f;
     DamageEvent pendingRay = {0};
     uint8_t damageCounter = 1;
+    uint8_t eventCounter = 1;
+    LanEvent pendingEvent = {0};
     Sound hitSound = MakeTone(220.0f, 0.08f, 0.35f);
+    Sound killSound = MakeTone(520.0f, 0.12f, 0.32f);
+    Sound feedSound = MakeTone(380.0f, 0.16f, 0.22f);
     Sound perkSound = MakeTone(540.0f, 0.1f, 0.25f);
     Sound boxSound = MakeTone(360.0f, 0.12f, 0.28f);
     Sound reviveSound = MakeTone(720.0f, 0.1f, 0.3f);
@@ -1727,7 +1845,7 @@ int main(int argc, char **argv)
                 {
                     lan.peers[i].respawnTimer = 0.0f;
                     lan.peers[i].health = PLAYER_MAX_HEALTH;
-                    lan.peers[i].renderPos = gArenaPresets[arenaIndex].playerSpawn;
+                    lan.peers[i].renderPos = SelectSafeSpawn(&gArenaPresets[arenaIndex]);
                 }
             }
         }
@@ -1956,7 +2074,7 @@ int main(int argc, char **argv)
                     propSpotCount = gArenaPresets[arenaIndex].spotCount;
                     memcpy(propSpots, gArenaPresets[arenaIndex].spots, sizeof(PropSpot) * propSpotCount);
                     LoadPresetOverride(gArenaPresets[arenaIndex].name, propSpots, &propSpotCount);
-                    camera.position = Vector3Add(gArenaPresets[arenaIndex].playerSpawn, (Vector3){0, 0.0f, 0});
+                    camera.position = SelectSafeSpawn(&gArenaPresets[arenaIndex]);
                 }
                 break;
             case MENU_ACTION_SAVE:
@@ -1983,6 +2101,8 @@ int main(int argc, char **argv)
                     teamScores[0] = teamScores[1] = 0;
                     for (int i = 0; i < (int)(sizeof(weaponAmmo) / sizeof(weaponAmmo[0])); i++)
                         weaponAmmo[i] = weapons[i].maxAmmo;
+                    camera.position = SelectSafeSpawn(&gArenaPresets[arenaIndex]);
+                    camera.target = Vector3Add(camera.position, (Vector3){0.0f, 0.0f, -1.0f});
                 }
                 break;
             }
@@ -2011,13 +2131,20 @@ int main(int argc, char **argv)
 
         if (mode == MODE_MULTIPLAYER && playerRespawnTimer > 0.0f)
         {
+            Vector3 safeSpawn = SelectSafeSpawn(&gArenaPresets[arenaIndex]);
+            double orbit = now;
+            Vector3 drift = {safeSpawn.x + sinf((float)orbit * 0.9f) * 0.8f,
+                              safeSpawn.y + 0.3f + sinf((float)orbit * 1.3f) * 0.08f,
+                              safeSpawn.z + cosf((float)orbit * 0.9f) * 0.8f};
+            camera.position = Vector3Lerp(camera.position, drift, Clamp(dt * 2.2f, 0.0f, 1.0f));
+            camera.target = Vector3Lerp(camera.target, safeSpawn, Clamp(dt * 3.0f, 0.0f, 1.0f));
             playerRespawnTimer -= dt;
             if (playerRespawnTimer <= 0.0f)
             {
                 player.health = PLAYER_MAX_HEALTH;
                 for (int i = 0; i < (int)(sizeof(weaponAmmo) / sizeof(weaponAmmo[0])); i++)
                     weaponAmmo[i] = weapons[i].maxAmmo;
-                camera.position = gArenaPresets[arenaIndex].playerSpawn;
+                camera.position = safeSpawn;
                 camera.target = Vector3Add(camera.position, (Vector3){0.0f, 0.0f, -1.0f});
                 playerRespawnTimer = 0.0f;
             }
@@ -2072,14 +2199,40 @@ int main(int argc, char **argv)
                   &sharePipCash,
                   &sharePipScore,
                   &pendingRay,
-                  mode == MODE_MULTIPLAYER);
+                  mode == MODE_MULTIPLAYER,
+                  &pendingEvent,
+                  &eventCounter);
+
+        if (lan.hasIncomingEvent)
+        {
+            LanEvent evt = lan.incomingEvent;
+            lan.hasIncomingEvent = false;
+            char actor[LAN_NAME_BYTES + 4] = {0};
+            char target[LAN_NAME_BYTES + 4] = {0};
+            strncpy(actor, evt.actor[0] ? evt.actor : "Peer", sizeof(actor) - 1);
+            strncpy(target, evt.target[0] ? evt.target : "opponent", sizeof(target) - 1);
+            if (evt.kind == 1)
+            {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "%s fragged %s", actor, target);
+                PushKillfeedSfx(killfeed, killfeedCount, buf, ORANGE, feedSound);
+                if (mpVariant == MULTI_TEAM && evt.team >= 0 && evt.team < 2)
+                    teamScores[evt.team]++;
+            }
+            else if (evt.kind == 2)
+            {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "%s assisted %s", actor, target);
+                PushKillfeedSfx(killfeed, killfeedCount, buf, SKYBLUE, feedSound);
+            }
+        }
 
         if (mode == MODE_MULTIPLAYER && player.health <= 0.0f && playerRespawnTimer <= 0.0f)
         {
             playerRespawnTimer = 2.5f;
             player.health = 0.0f;
             deathCount++;
-            PushKillfeed(killfeed, killfeedCount, "You were fragged", RED);
+            PushKillfeedSfx(killfeed, killfeedCount, "You were fragged", RED, feedSound);
         }
 
         if (isZombies)
@@ -2091,6 +2244,7 @@ int main(int argc, char **argv)
                           trails,
                           &trailIndex,
                           gArenaPresets[arenaIndex].navPoints,
+                          gArenaPresets[arenaIndex].navWeights,
                           gArenaPresets[arenaIndex].navCount);
             if (player.health <= 0.0f)
             {
@@ -2320,6 +2474,8 @@ int main(int argc, char **argv)
                     PlaySoundSafe(hitSound);
                     hitMarker.timer = 0.3f;
                     hitMarker.isKill = (!isZombies && peerFragged >= 0) || (isZombies && kills > 0);
+                    if (hitMarker.isKill)
+                        PlaySoundSafe(killSound);
                 }
                 weaponAmmo[weaponIndex]--;
                 if (isZombies)
@@ -2345,7 +2501,16 @@ int main(int argc, char **argv)
                     const char *fragName = lan.peers[peerFragged].name[0] ? lan.peers[peerFragged].name : "Peer";
                     char buf[48];
                     snprintf(buf, sizeof(buf), "Fragged %s", fragName);
-                    PushKillfeed(killfeed, killfeedCount, buf, ORANGE);
+                    PushKillfeedSfx(killfeed, killfeedCount, buf, ORANGE, feedSound);
+                    pendingEvent.kind = 1;
+                    pendingEvent.team = playerTeam;
+                    strncpy(pendingEvent.target, fragName, LAN_NAME_BYTES - 1);
+                }
+                else if (hits > 0 && !isZombies && pendingEvent.kind == 0)
+                {
+                    pendingEvent.kind = 2;
+                    pendingEvent.team = playerTeam;
+                    strncpy(pendingEvent.target, "assist", LAN_NAME_BYTES - 1);
                 }
             }
             else
@@ -2365,6 +2530,11 @@ int main(int argc, char **argv)
         DrawRetroCube((Vector3){-4.0f, 0.4f, 1.5f}, 0.9f, 1.2f, 0.6f, (Color){80, 110, 160, 255});
         DrawRetroCube((Vector3){4.0f, 0.35f, -1.5f}, 0.8f, 1.0f, 0.8f, (Color){150, 120, 90, 255});
         DrawRetroCube((Vector3){0.0f, 0.25f, 3.5f}, 1.2f, 0.6f, 1.2f, (Color){60, 80, 110, 255});
+        for (int i = 0; i < gArenaPresets[arenaIndex].coverCount; i++)
+        {
+            CoverPiece c = gArenaPresets[arenaIndex].cover[i];
+            DrawRetroCube(c.position, c.size.x, c.size.y, c.size.z, c.color);
+        }
         for (int i = 0; i < propSpotCount; i++)
         {
             Vector3 snapped = propSpots[i].position;
