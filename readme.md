@@ -1,1 +1,2 @@
-hello, this will be the fps read me
+
+It will be a low poly, ps1 / ps2 style graphics like golden eye. I will be a lan multiplayer FPS with a low power console being able to host at least 8 players and have a hotspot so no other devices needed. it will be hitscan and have 5 differant guns. a ak 47, sniper, shotgun, piston and sub machine gun. each with differat movment speed and damage. the NPCs will be zombies, exclusivly in the zombies mode. we will style it as our take on black ops zombies, with the said ps1 graphics. there will be perks, wall buy guns, mystery box and boss zombies
