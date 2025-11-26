@@ -26,6 +26,20 @@ Low-poly, PS1/PS2-inspired LAN FPS prototype targeted at ultra-lean handheld har
 1. Install Raylib development headers/libraries (e.g., `sudo apt install libraylib-dev` or build from source).
 2. Run `make` to produce `build/u8_fps`.
 
+### Syncing with `main` when your branch conflicts
+- If you just want your local branch to match the latest `main` and do **not** need your local edits, hard-reset to the remote tip:
+  ```bash
+  git fetch origin
+  git reset --hard origin/main
+  ```
+- If a merge is already in progress and you only want the remote (“theirs”) version of every conflicting file, finish the merge by taking theirs everywhere:
+  ```bash
+  git checkout --theirs .
+  git add .
+  git commit -m "Resolve conflicts by taking remote"
+  ```
+- If you need to keep local edits, resolve file-by-file with your diff tool or `git checkout --ours/--theirs <file>`, then `git add` each resolved file and `git commit`.
+
 ## Running
 - Launch with `./build/u8_fps` after building.
 - Add `--zombies` to jump straight into the Zombies prototype loop, or `--team` to bias the lobby toward team deathmatch before you spawn (default is multiplayer FFA).
