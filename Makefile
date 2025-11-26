@@ -8,15 +8,15 @@ TARGET ?= build/u8_fps
 all: $(TARGET)
 
 $(TARGET): $(OBJ) | build
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 build/%.o: src/%.c | build
-	$(CC) $(CFLAGS) -c $< -o $@ $(LDFLAGS)
+$(CC) $(CFLAGS) -c $< -o $@ $(LDFLAGS)
 
 build:
-	mkdir -p $@
+mkdir -p $@
 
 clean:
-	rm -rf build
+rm -rf build
 
 .PHONY: all clean
